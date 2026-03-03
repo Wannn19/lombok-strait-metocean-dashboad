@@ -1,0 +1,1331 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meteo Data Viewer - Final Merged (3D Enabled)</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    
+    <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
+    
+    <style>
+        :root {
+            /* Warna default (akan di-override oleh JS) */
+            --neon-color: #FF4D4D;  
+            --neon-glow: rgba(255, 77, 77, 0.4);
+            
+            --bg-dark: #0b0b0b;
+            --panel-bg: #141414;
+            --text-color: #e0e0e0;
+        }
+
+        body { margin: 0; padding: 0; background-color: var(--bg-dark); font-family: 'Inter', sans-serif; color: var(--text-color); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+        header { height: 50px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; background: #111; flex-shrink: 0; z-index: 2000; }
+        .brand h1 { margin: 0; font-size: 16px; font-weight: 600; color: #fff; letter-spacing: 0.5px; }
+        .brand span { color: #888; font-size: 11px; font-weight: 400; margin-left: 10px; }
+
+        .controls-area { flex: 1; display: flex; justify-content: flex-end; align-items: center; gap: 15px; padding-right: 20px; }
+
+        /* INPUT SELECTOR STYLE */
+        .var-select {
+            background: #222;
+            color: #fff;
+            border: 1px solid #444;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: 'Inter', sans-serif;
+            cursor: pointer;
+            outline: none;
+        }
+        .var-select:hover { border-color: var(--neon-color); }
+
+        .stats-row { display: flex; gap: 20px; }
+        .stat-item { text-align: right; display: flex; align-items: center; gap: 8px; }
+        .stat-label { font-size: 10px; color: #666; text-transform: uppercase; }
+        .stat-val { font-size: 14px; font-weight: 700; font-family: 'Roboto Mono', monospace; }
+
+        /* LAYOUT 50% - 50% */
+        .main-content { 
+            flex: 1; 
+            display: grid; 
+            grid-template-columns: 1fr 1fr; /* 50% 50% Split */
+            gap: 10px; 
+            padding: 10px; 
+            height: calc(100vh - 50px); 
+            box-sizing: border-box; 
+            overflow: hidden; 
+        }
+
+        /* PANEL KIRI (PETA) */
+        .left-panel { 
+            display: flex; flex-direction: column; gap: 10px; height: 100%; min-height: 0; 
+            order: 1; 
+        }
+
+        /* PANEL KANAN (DATA) */
+        .right-panel { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 15px; 
+            padding: 20px 30px; 
+            justify-content: flex-start; 
+            background: var(--bg-dark); 
+            height: 100%;
+            order: 2; 
+            overflow-y: auto; 
+            box-sizing: border-box;
+        }
+
+        /* CHART ASPECT RATIO 2:1 */
+        .chart-container { 
+            flex: 0 0 auto; 
+            width: 100%; 
+            aspect-ratio: 2 / 1; 
+            max-height: 45vh; 
+            background: var(--panel-bg); 
+            border: 1px solid #2a2a2a; 
+            border-radius: 8px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5); 
+            display: flex; flex-direction: column; 
+        }
+
+        /* CONTROLS (BUTTONS) */
+        .controls-container { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 8px; 
+            flex: 0 0 auto; 
+            width: 100%;
+        }
+        
+        .sub-mode-controls { 
+            display: flex; 
+            justify-content: center; 
+            gap: 10px; 
+            background: var(--panel-bg); 
+            padding: 10px; 
+            border-radius: 8px; 
+            border: 1px solid #333; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+        .sm-btn { background: transparent; border: 1px solid #444; color: #888; padding: 6px 12px; font-size: 10px; border-radius: 4px; cursor: pointer; font-weight: 600; transition: all 0.2s; font-family: 'Inter', sans-serif; }
+        .sm-btn:hover { border-color: #666; color: #ccc; }
+        .sm-btn.active { background: var(--neon-color); border-color: var(--neon-color); color: #000; box-shadow: 0 0 10px var(--neon-glow); }
+        
+        .cmp-btn.active { background: #fff; border-color: #fff; color: #000; box-shadow: 0 0 10px rgba(255,255,255,0.5); }
+
+        /* BOTTOM ROW SPLIT (50% Wind Rose | 50% Stats) */
+        .bottom-row { 
+            flex: 1; 
+            min-height: 180px; 
+            width: 100%; 
+            margin-bottom: 0;
+            display: grid;
+            grid-template-columns: 1fr 1fr; 
+            gap: 15px;
+        }
+
+        .rose-container {
+            background: var(--panel-bg);
+            border: 1px solid #333;
+            border-radius: 12px;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        
+        #roseImage { width: 95%; height: 95%; object-fit: contain; display: block; }
+
+        .new-stats-container { 
+            background: transparent; border: none; overflow: visible; 
+            display: flex; flex-direction: column; justify-content: center;
+        }
+        .stats-content-box { width: 100%; height: 100%; }
+        
+        .stat-group { 
+            background: var(--panel-bg); border: 1px solid #333; border-radius: 12px; 
+            padding: 20px; display: flex; flex-direction: column; justify-content: center; 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3); width: 100%; height: 100%; 
+            box-sizing: border-box; transition: transform 0.2s; 
+        }
+        .stat-group:hover { border-color: #555; }
+        .sg-title { font-size: 14px; font-weight: 700; text-align: center; border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 15px; letter-spacing: 1px; text-transform: uppercase; color: var(--neon-color); }
+        .sg-row { font-size: 13px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #222; padding-bottom: 6px; }
+        .sg-row:last-child { border-bottom: none; }
+        .sg-label { color: #888; font-weight: 500; }
+        .sg-val { font-size: 18px; font-weight: 700; color: #fff; font-family: 'Roboto Mono', monospace; }
+
+        .chart-header { padding: 8px 12px; border-bottom: 1px solid #222; font-size: 11px; font-weight: 600; color: #888; display: flex; justify-content: space-between; align-items: center; }
+        .legend-indicator { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        
+        .canvas-wrapper { flex: 1; position: relative; width: 100%; cursor: crosshair; overflow: hidden; }
+        canvas { display: block; width: 100%; height: 100%; }
+
+        .spatial-panel { flex: 1; background: #0f0f0f; border: 1px solid #2a2a2a; border-radius: 4px; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+        .spatial-header { padding: 6px 10px; border-bottom: 1px solid #222; font-size: 10px; font-weight: 600; color: #888; display: flex; justify-content: space-between; background: var(--panel-bg); flex-shrink: 0; z-index: 1001; position: relative; }
+        .spatial-main { flex: 1; position: relative; min-height: 0; }
+        
+        #map { width: 100%; height: 100%; background: var(--bg-dark); position: absolute; top: 0; left: 0; z-index: 1;}
+        
+        /* 3D Container */
+        #map3d-container { width: 100%; height: 100%; background: #000; position: absolute; top: 0; left: 0; z-index: 0; display: none; }
+
+        .coord-display { position: absolute; bottom: 10px; left: 10px; background: rgba(15, 15, 15, 0.85); border: 1px solid #444; padding: 4px 8px; border-radius: 4px; color: #e0e0e0; font-family: 'Roboto Mono', monospace; font-size: 10px; z-index: 1005; pointer-events: none; display: none; backdrop-filter: blur(2px); }
+
+        .colorbar-container { position: absolute; bottom: 20px; right: 10px; background: transparent; padding: 0; z-index: 1002; display: none; flex-direction: column; align-items: center; filter: drop-shadow(0 0 5px rgba(0,0,0,0.8)); }
+        .colorbar-img { max-height: 250px; width: auto; display: block; }
+
+        /* BUTTON STYLES ADAPTED FOR COMPATIBILITY */
+        .map-toggle-btn { position: absolute; top: 10px; right: 10px; z-index: 1005; background: rgba(20, 20, 20, 0.9); color: #ccc; border: 1px solid #444; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 10px; font-family: 'Inter', sans-serif; font-weight: 600; transition: all 0.2s ease; backdrop-filter: blur(4px); box-shadow: 0 2px 5px rgba(0,0,0,0.5); }
+        .map-toggle-btn:hover { background: #333; color: #fff; }
+
+        #viewToggleBtn { position: absolute; top: 45px; right: 10px; z-index: 1005; background: rgba(20, 20, 20, 0.9); color: #ccc; border: 1px solid #444; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 10px; font-family: 'Inter', sans-serif; font-weight: 600; transition: all 0.3s ease; backdrop-filter: blur(4px); box-shadow: 0 2px 5px rgba(0,0,0,0.5); }
+        #viewToggleBtn:hover { background: #333; color: #fff; }
+        #viewToggleBtn.spatial-active { background: linear-gradient(90deg, #1fa2ff 0%, #12d8fa 100%); border: none; color: #000; box-shadow: 0 0 10px rgba(18, 216, 250, 0.5); }
+
+        /* 3D Button Style (Added below viewToggle) */
+        #threedToggleBtn { position: absolute; top: 80px; right: 10px; z-index: 1005; background: rgba(20, 20, 20, 0.9); color: #ccc; border: 1px solid #444; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 10px; font-family: 'Inter', sans-serif; font-weight: 600; transition: all 0.3s ease; backdrop-filter: blur(4px); box-shadow: 0 2px 5px rgba(0,0,0,0.5); }
+        #threedToggleBtn:hover { background: #333; color: #fff; }
+        #threedToggleBtn.active-3d { background: linear-gradient(90deg, #FF4D4D 0%, #F9CB28 100%); border: none; color: #000; box-shadow: 0 0 10px rgba(255, 77, 77, 0.5); }
+
+        /* 3D Controls */
+        .threed-controls {
+            position: absolute; top: 10px; left: 50%; transform: translateX(-50%); 
+            z-index: 1006; display: none; gap: 5px;
+            background: rgba(20, 20, 20, 0.8); padding: 5px; border-radius: 8px; border: 1px solid #444;
+        }
+        .threed-btn {
+            background: transparent; border: 1px solid #555; color: #aaa; padding: 4px 10px; 
+            font-size: 10px; cursor: pointer; border-radius: 4px; transition: all 0.2s; font-weight: 600;
+        }
+        .threed-btn.active { background: var(--neon-color); color: #000; border-color: var(--neon-color); }
+
+
+        #tooltip { position: absolute; display: none; background: rgba(15, 15, 15, 0.95); border: 1px solid #444; padding: 8px 12px; border-radius: 4px; pointer-events: none; color: #eee; z-index: 2005; font-size: 11px; white-space: nowrap; box-shadow: 0 4px 20px rgba(0,0,0,0.6); }
+        .loading-overlay { position: absolute; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.7); display: none; justify-content: center; align-items: center; z-index: 9999; color: #fff; font-size: 12px; }
+
+        @keyframes neonPulse { 0% { filter: drop-shadow(0 0 2px inherit); opacity: 0.7; } 50% { filter: drop-shadow(0 0 10px inherit); opacity: 1; } 100% { filter: drop-shadow(0 0 2px inherit); opacity: 0.7; } }
+        .neon-center-path { stroke: var(--neon-color); stroke-width: 3px; fill: var(--neon-color); fill-opacity: 0.6; filter: drop-shadow(0 0 6px var(--neon-color)); transform-box: fill-box; transform-origin: center; transform: scale(1.15); animation: neonPulse 2s infinite ease-in-out; z-index: 500; }
+        .neon-neighbor-path { stroke: #999; stroke-width: 1.5px; fill: var(--neon-color); fill-opacity: 0.3; filter: drop-shadow(0 0 3px var(--neon-color)); transform-box: fill-box; transform-origin: center; transform: scale(1.05); animation: neonPulse 2s infinite ease-in-out; animation-delay: 0.2s; z-index: 499; }
+        .grid-cell-path { transition: stroke 0.1s, fill-opacity 0.1s, transform 0.2s; }
+        .chart-locked { cursor: default !important; }
+
+        .cursor-ns { cursor: ns-resize !important; }
+        .cursor-ew { cursor: ew-resize !important; }
+        .maplibregl-ctrl-bottom-right { display: none; }
+    </style>
+</head>
+<nav style="background-color: #1a1a1a; padding: 15px 30px; display: flex; gap: 20px; border-bottom: 1px solid #333; font-family: sans-serif;">
+    <span style="color: #00d4ff; font-weight: bold; margin-right: auto;">OCEAN DATA VIEWER</span>
+    <a href="index.html" style="color: white; text-decoration: none; padding: 5px 10px; border-radius: 4px; transition: 0.3s;">🌊 Wave & Wind Analysis</a>
+    <a href="climate_dashboard.html" style="color: white; text-decoration: none; padding: 5px 10px; border-radius: 4px; transition: 0.3s;">☀️ Atmospheric Parameters</a>
+</nav>
+<body>
+
+<div class="loading-overlay" id="loadingOverlay">Memuat Data...</div>
+
+<header>
+    <div class="brand">
+        <h1>METEO DATA VIEWER</h1>
+        <span>ERA5 Reanalysis • Multi-Variable</span>
+    </div>
+    <div class="controls-area">
+        <select id="modeSelect" class="var-select" style="margin-right: 10px; border-color: #555;">
+            <option value="line" selected>📈 MODE: LINE PLOT</option>
+            <option value="boxplot">📊 MODE: BOX PLOT</option>
+        </select>
+
+        <select id="varSelect" class="var-select">
+            <option value="temp" selected>2m Temperature (TEMP)</option>
+            <option value="precip">Total Precipitation (PRECIP)</option>
+            <option value="rad">Solar Radiation (RAD)</option>
+        </select>
+
+        <div class="stats-row">
+            <div class="stat-item">
+                <span class="stat-label" id="headerStatLabel">TEMP (°C)</span>
+                <span class="stat-val" style="color:var(--neon-color)" id="valMain">--.--</span>
+            </div>
+        </div>
+    </div>
+</header>
+
+<div class="main-content layout-particular" id="mainContentArea">
+    <div class="left-panel">
+        <div class="spatial-panel">
+            <div class="spatial-header">
+                <span class="spatial-title" id="mapTitle">SPATIAL FIELD (9-GRID SELECTOR)</span>
+                <span class="spatial-time" id="spatialTimeLabel">Select Grid Point</span>
+            </div>
+            <div class="spatial-main">
+                <div id="map"></div>
+                <div id="map3d-container"></div>
+                
+                <div id="threedControls" class="threed-controls">
+                    <button class="threed-btn active" id="mode3dGlobal">📊 GLOBAL VIEW</button>
+                    <button class="threed-btn" id="mode3dGrid">🎯 GRID SELECTOR</button>
+                </div>
+
+                <button id="mapToggleBtn" class="map-toggle-btn">🛰 SATELIT</button>
+                <button id="viewToggleBtn" class="">🗺️ SPATIAL VIEW</button>
+                <button id="threedToggleBtn" class="">🧊 3D VIEW</button>
+
+                <div id="coordDisplay" class="coord-display">LAT: -- | LON: --</div>
+                <div id="colorbarLegend" class="colorbar-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="right-panel" id="chartWrapper">
+        <div class="controls-container">
+            <div style="display: flex; justify-content: space-between; gap: 10px;">
+                <div class="sub-mode-controls" id="subModeControls" style="flex: 1;">
+                    <button class="sm-btn active" data-mode="ts">TIME SERIES</button>
+                    <button class="sm-btn" data-mode="clim">MONTHLY CLIM</button>
+                    <button class="sm-btn" data-mode="seas">SEASONAL</button>
+                </div>
+                
+                <div class="sub-mode-controls" id="compareControls" style="flex: 1; border-color: #444;">
+                    <span style="font-size: 9px; color: #888; align-self: center; margin-right: 5px; font-weight:600;">OVERLAY:</span>
+                    <button class="sm-btn cmp-btn active" data-cmp="none">NONE</button>
+                    <button class="sm-btn cmp-btn" data-cmp="temp">TEMP</button>
+                    <button class="sm-btn cmp-btn" data-cmp="precip">PRECIP</button>
+                    <button class="sm-btn cmp-btn" data-cmp="rad">RAD</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-header">
+                <div>
+                    <span class="legend-indicator" style="background:var(--neon-color)"></span>
+                    <span id="chartMainTitle">2M TEMPERATURE (Click to Lock, Drag Axis to Zoom)</span>
+                </div>
+                <span id="chartUnitLabel">°C (Celsius)</span>
+            </div>
+            <div class="canvas-wrapper">
+                <canvas id="canvasCombined"></canvas>
+            </div>
+        </div>
+        
+        <div class="bottom-row">
+            <div class="rose-container" id="roseWrapper" style="display:none;">
+                <img id="roseImage" alt="Wind Rose" src="">
+                <div id="roseLabel" style="position:absolute; color:#555; font-size:10px; top:10px; left:10px; pointer-events:none;">WIND ROSE</div>
+            </div>
+            
+            <div class="new-stats-container" id="statsWrapper" style="grid-column: span 2;">
+                <div class="stats-content-box" id="newStatsBox"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="tooltip"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/deck.gl@8.9.33/dist.min.js"></script>
+
+<script>
+    const DATA_SOURCES = {
+        temp: { 
+            url: 'data/temp_data.json', 
+            label: '2M TEMPERATURE', 
+            unit: '°C', 
+            short: 'TEMP', 
+            desc: '°C (Celsius)', 
+            color: '#FF4D4D', 
+            fillTop: 'rgba(255, 77, 77, 0.4)', 
+            fillBottom: 'rgba(255, 77, 77, 0.0)',
+            // 3D Config matches RdYlBu_r
+            heightScale: 80000, offset: 25, cmap: 'RdYlBu_r' 
+        },
+        precip: { 
+            url: 'data/precip_data.json', 
+            label: 'TOTAL PRECIPITATION', 
+            unit: 'mm', 
+            short: 'PRECIP', 
+            desc: 'mm (Millimeters/Month)', 
+            color: '#00C2FF', 
+            fillTop: 'rgba(0, 194, 255, 0.4)', 
+            fillBottom: 'rgba(0, 194, 255, 0.0)',
+            // 3D Config matches Blues
+            heightScale: 80000, offset: 0, cmap: 'Blues' 
+        },
+        rad: { 
+            url: 'data/rad_data.json', 
+            label: 'SOLAR RADIATION', 
+            unit: 'W/m²', 
+            short: 'RAD', 
+            desc: 'W/m² (Watts per square meter)', 
+            color: '#FF9E00', 
+            fillTop: 'rgba(255, 158, 0, 0.4)', 
+            fillBottom: 'rgba(255, 158, 0, 0.0)',
+            // 3D Config matches Oranges
+            heightScale: 80000, offset: 0, cmap: 'Oranges' 
+        }
+    };
+
+    // Mapping untuk JSON Boxplot (kunci di JSON vs kunci di DATA_SOURCES)
+    const BOXPLOT_VAR_MAP = {
+        temp: 'temp',
+        precip: 'tp',
+        rad: 'ssrd'
+    };
+
+    // --- [FIXED COLORMAP INTERPOLATION FOR 3D TO MATCH BACKEND] ---
+    const CMAP_BLUES = [{pos:0.0,color:[247,251,255]},{pos:0.3,color:[158,202,225]},{pos:0.6,color:[66,146,198]},{pos:1.0,color:[8,48,107]}];
+    const CMAP_ORANGES = [{pos:0.0,color:[255,245,235]},{pos:0.3,color:[253,174,107]},{pos:0.6,color:[230,85,13]},{pos:1.0,color:[127,39,4]}];
+    const CMAP_RDYLBU_R = [{pos:0.0,color:[49,54,149]},{pos:0.25,color:[116,173,209]},{pos:0.5,color:[255,255,191]},{pos:0.75,color:[244,109,67]},{pos:1.0,color:[165,0,38]}];
+
+    function interpolateColor(value, min, max, scheme) {
+        let t = (value - min) / (max - min); t = Math.max(0, Math.min(1, t));
+        let lower = scheme[0]; let upper = scheme[scheme.length - 1];
+        for (let i = 0; i < scheme.length - 1; i++) { if (t >= scheme[i].pos && t <= scheme[i+1].pos) { lower = scheme[i]; upper = scheme[i+1]; break; } }
+        const range = upper.pos - lower.pos; const localT = (t - lower.pos) / range;
+        const r = Math.round(lower.color[0] + (upper.color[0] - lower.color[0]) * localT);
+        const g = Math.round(lower.color[1] + (upper.color[1] - lower.color[1]) * localT);
+        const b = Math.round(lower.color[2] + (upper.color[2] - lower.color[2]) * localT);
+        return [r, g, b];
+    }
+
+    function getComplexColor(val, min, max, type) {
+        if (type === 'Blues') return interpolateColor(val, min, max, CMAP_BLUES);
+        if (type === 'Oranges') return interpolateColor(val, min, max, CMAP_ORANGES);
+        if (type === 'RdYlBu_r') return interpolateColor(val, min, max, CMAP_RDYLBU_R);
+        return [200, 200, 200];
+    }
+    
+    let currentVar = 'temp'; 
+    const THEME = { grid: '#222', text: '#555', crosshair: '#fff' };
+
+    let fullChartData = []; 
+    let gridJsonData = null; 
+    let gridSubMode = 'ts'; 
+    let viewMode = 'grid';  
+
+    // MODIFIKASI: State Box Plot
+    let chartMode = 'line'; 
+    let boxplotJsonData = null; 
+    let boxplotChartData = []; // [[min, q1, med, q3, max], ...]
+
+    // 3D MODE STATES
+    let is3DMode = false; 
+    let is3DGridSelector = false; 
+    let hoveredGrid3D = null; // Store [row, col]
+    let raf3D_Lock = null; // Anti-Lag Lock
+
+    let hoverIndex = -1;
+    let isChartLocked = false;
+    let lockedHoverIndex = -1; 
+
+    let gridRects = {}; 
+    let activeHighlights = []; 
+    let isGridLocked = false;  
+    let lockedGridKey = null;  
+    let currentGridRow = -1;
+    let currentGridCol = -1;
+
+    let zoomState = { yMin: null, yMax: null, yMinSec: null, yMaxSec: null, xStartIdx: 0, xEndIdx: 0, isYManual: false, isYManualSec: false, isXManual: false };
+    let isZoomingY_Pri = false; 
+    let isZoomingY_Sec = false; 
+    let isZoomingX = false;
+    let lastMouseY = 0;
+    let lastMouseX = 0;
+
+    let compareVar = 'none'; 
+    let secondaryJsonData = null; 
+    let secondaryChartData = [];  
+    const dataCache = {}; 
+    
+    const cvsCombined = document.getElementById('canvasCombined');
+    const ctxCombined = cvsCombined.getContext('2d');
+    const wrapper = document.getElementById('chartWrapper');
+    const tooltip = document.getElementById('tooltip');
+    const coordDisplay = document.getElementById('coordDisplay');
+    const btnMapToggle = document.getElementById('mapToggleBtn');
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    const smBtns = document.querySelectorAll('.sm-btn');
+    const viewToggleBtn = document.getElementById('viewToggleBtn');
+    // 3D Controls
+    const threedToggleBtn = document.getElementById('threedToggleBtn');
+    const threedControls = document.getElementById('threedControls');
+    const mode3dGlobal = document.getElementById('mode3dGlobal');
+    const mode3dGrid = document.getElementById('mode3dGrid');
+
+    const mapTitle = document.getElementById('mapTitle');
+    const colorbarLegend = document.getElementById('colorbarLegend');
+    const spatialTimeLabel = document.getElementById('spatialTimeLabel');
+    const varSelect = document.getElementById('varSelect'); 
+    
+    // MODIFIKASI: Selector Event Mode
+    const modeSelect = document.getElementById('modeSelect');
+    modeSelect.addEventListener('change', (e) => {
+        chartMode = e.target.value;
+        if (chartMode === 'boxplot' && compareVar !== 'none') {
+            compareVar = 'none';
+            document.querySelectorAll('.cmp-btn').forEach(b => b.classList.remove('active'));
+            document.querySelector('[data-cmp="none"]').classList.add('active');
+            secondaryChartData = [];
+        }
+        resetZoom();
+        if (viewMode === 'spatial' || is3DMode) loadAreaAverageData(); 
+        else if (currentGridRow !== -1) loadGridDataToChart(currentGridRow, currentGridCol);
+        drawAll();
+    });
+
+    varSelect.addEventListener('change', (e) => { currentVar = e.target.value; loadData(); });
+
+    const cmpBtns = document.querySelectorAll('.cmp-btn');
+    cmpBtns.forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const selected = btn.dataset.cmp;
+            if (chartMode === 'boxplot') return; // Nonaktifkan overlay jika boxplot aktif
+            if (selected === currentVar && selected !== 'none') return;
+            cmpBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            compareVar = selected;
+            if (compareVar !== 'none') { await loadSecondaryData(compareVar); } else { secondaryChartData = []; zoomState.yMinSec = null; zoomState.yMaxSec = null; zoomState.isYManualSec = false; drawAll(); }
+        });
+    });
+
+    async function loadSecondaryData(varName) {
+        if (dataCache[varName]) { secondaryJsonData = dataCache[varName]; syncSecondaryData(); return; }
+        loadingOverlay.textContent = `Memuat Data Overlay ${DATA_SOURCES[varName].short}...`;
+        loadingOverlay.style.display = 'flex';
+        try {
+            const res = await fetch(DATA_SOURCES[varName].url);
+            const json = await res.json();
+            dataCache[varName] = json; secondaryJsonData = json; syncSecondaryData();
+        } catch (e) { console.error(e); alert("Gagal memuat data overlay."); compareVar = 'none'; document.querySelector('[data-cmp="none"]').click(); } finally { loadingOverlay.style.display = 'none'; }
+    }
+
+    function syncSecondaryData() {
+        if (!secondaryJsonData || compareVar === 'none') return;
+        let rawVals;
+        if (viewMode === 'grid' && currentGridRow !== -1) {
+            const key = `${currentGridRow},${currentGridCol}`;
+            const cellData = secondaryJsonData.grid_data[key];
+            if (!cellData) { secondaryChartData = []; drawAll(); return; }
+            if (gridSubMode === 'ts') rawVals = cellData.ts; else if (gridSubMode === 'clim') rawVals = cellData.clim; else if (gridSubMode === 'seas') rawVals = cellData.seas;
+        } else {
+            const aaData = secondaryJsonData.area_average;
+            if (gridSubMode === 'ts') rawVals = aaData.ts; else if (gridSubMode === 'clim') rawVals = aaData.clim; else if (gridSubMode === 'seas') rawVals = aaData.seas;
+        }
+        secondaryChartData = rawVals.map((val, idx) => ({ val: val, originalIdx: idx })).filter(d => d.val !== null);
+        zoomState.isYManualSec = false; zoomState.yMinSec = null; zoomState.yMaxSec = null;
+        drawAll(); 
+    }
+
+    let resizeObserver = null;
+    let imageBounds = [[-9.6, 115.1], [-7.6, 117.1]]; 
+    
+    // --- 2D MAP SETUP ---
+    let map = L.map('map', { zoomControl: false, attributionControl: true, scrollWheelZoom: true, doubleClickZoom: false });
+    map.fitBounds(imageBounds);
+    const darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: '&copy; CARTO', subdomains: 'abcd', maxZoom: 19 });
+    const satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', maxZoom: 19 });
+    darkLayer.addTo(map);
+    let isSatellite = false;
+    let gridLayerGroup = L.layerGroup().addTo(map);
+    let spatialOverlay = L.imageOverlay("", imageBounds, { opacity: 0, interactive: false }).addTo(map);
+
+    const INDONESIA_GEOJSON_URL = 'https://raw.githubusercontent.com/ans-4175/peta-indonesia-geojson/master/indonesia-provinsi-simple.json';
+    let landLayer = null;
+    fetch(INDONESIA_GEOJSON_URL).then(res => res.json()).then(data => {
+        landLayer = L.geoJSON(data, { style: { color: DATA_SOURCES['temp'].color, weight: 2, opacity: 1, fillColor: '#0b0b0b', fillOpacity: 1 }, interactive: false }).addTo(map);
+        landLayer.bringToFront();
+    }).catch(err => console.error(err));
+
+    btnMapToggle.addEventListener('click', () => {
+        if (isSatellite) { map.removeLayer(satLayer); map.addLayer(darkLayer); btnMapToggle.textContent = "🛰 SATELIT"; if(landLayer) landLayer.setStyle({ fillOpacity: 1, fillColor: '#0b0b0b', color: DATA_SOURCES[currentVar].color }); } else { map.removeLayer(darkLayer); map.addLayer(satLayer); btnMapToggle.textContent = "🌙 MODE GELAP"; if(landLayer) landLayer.setStyle({ fillOpacity: 0, color: '#fff' }); }
+        isSatellite = !isSatellite; spatialOverlay.bringToFront(); if(landLayer) landLayer.bringToFront(); if(viewMode === 'grid') gridLayerGroup.eachLayer(l => l.bringToFront());
+    });
+
+    map.on('mousemove', function(e) { coordDisplay.style.display = 'block'; coordDisplay.innerText = `LAT: ${e.latlng.lat.toFixed(4)} | LON: ${e.latlng.lng.toFixed(4)}`; });
+    map.on('mouseout', function() { coordDisplay.style.display = 'none'; if (viewMode === 'grid' && !isGridLocked) { clearGridHighlights(); } });
+
+    // --- 3D MAP SETUP (DECK.GL) ---
+    let deckgl = null;
+    
+    function init3DMap() {
+        const centerLat = (imageBounds[0][0] + imageBounds[1][0]) / 2;
+        const centerLon = (imageBounds[0][1] + imageBounds[1][1]) / 2;
+        
+        deckgl = new deck.DeckGL({
+            container: 'map3d-container',
+            map: maplibregl, 
+            mapStyle: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+            initialViewState: {
+                longitude: centerLon,
+                latitude: centerLat,
+                zoom: 8,
+                pitch: 50,
+                bearing: 0
+            },
+            controller: true,
+            layers: [],
+            getTooltip: ({object}) => object && {
+                html: `<div style="color:${DATA_SOURCES[currentVar].color}; font-weight:bold;">${object.value.toFixed(2)} ${DATA_SOURCES[currentVar].unit}</div>
+                       <div style="color:#aaa; font-size:10px;">Lat: ${object.position[1].toFixed(3)}, Lon: ${object.position[0].toFixed(3)}</div>
+                       <div style="color:#aaa; font-size:9px;">Click to view chart</div>`,
+                style: {backgroundColor: '#111', fontSize: '0.8em', border: '1px solid #333'}
+            },
+            onHover: (info) => {
+                if(is3DGridSelector && info.object) {
+                    hoveredGrid3D = info.object.idx; 
+                    update3DLayer(getCurrentTimeIndex());
+                } else {
+                    if (hoveredGrid3D !== null) {
+                        hoveredGrid3D = null;
+                        if(is3DGridSelector) update3DLayer(getCurrentTimeIndex());
+                    }
+                }
+            },
+            onClick: (info) => {
+                if(info.object) {
+                    const idx = info.object.idx;
+                    handleGridClick(idx[0], idx[1]);
+                }
+            }
+        });
+    }
+
+    function getCurrentTimeIndex() {
+        if (hoverIndex >= 0 && fullChartData.length > 0 && hoverIndex < fullChartData.length) {
+            return hoverIndex;
+        }
+        return 0; 
+    }
+
+    function update3DLayer(timeIndex) {
+        if (!is3DMode || !gridJsonData || !deckgl) return;
+        
+        let maxLen = 0;
+        if (gridSubMode === 'ts') maxLen = gridJsonData.metadata.labels_ts.length;
+        else if (gridSubMode === 'clim') maxLen = 12;
+        else if (gridSubMode === 'seas') maxLen = 4;
+        
+        if (timeIndex >= maxLen) timeIndex = 0;
+
+        const conf = DATA_SOURCES[currentVar];
+        const lats = gridJsonData.metadata.latitudes;
+        const lons = gridJsonData.metadata.longitudes;
+        
+        let minVal = 0, maxVal = 30; // Default for Temp
+        if(gridJsonData.metadata.color_ranges && gridJsonData.metadata.color_ranges[gridSubMode]) {
+            minVal = gridJsonData.metadata.color_ranges[gridSubMode][0];
+            maxVal = gridJsonData.metadata.color_ranges[gridSubMode][1];
+        }
+
+        let data3d = [];
+        lats.forEach((lat, r) => {
+            lons.forEach((lon, c) => {
+                const key = `${r},${c}`;
+                const cellData = gridJsonData.grid_data[key];
+                if(cellData) {
+                    let val = null;
+                    if(gridSubMode === 'ts' && cellData.ts && cellData.ts[timeIndex] != null) val = cellData.ts[timeIndex];
+                    else if(gridSubMode === 'clim' && cellData.clim && cellData.clim[timeIndex] != null) val = cellData.clim[timeIndex];
+                    else if(gridSubMode === 'seas' && cellData.seas && cellData.seas[timeIndex] != null) val = cellData.seas[timeIndex];
+                    
+                    if (val !== null) data3d.push({ position: [lon, lat], value: val, idx: [r, c] });
+                }
+            });
+        });
+
+        const gridFloorLayer = new deck.ColumnLayer({
+            id: 'grid-floor',
+            data: data3d,
+            diskResolution: 4,
+            radius: 6500,
+            angle: 45,
+            extruded: false, 
+            pickable: is3DGridSelector, 
+            elevationScale: 0,
+            getPosition: d => d.position,
+            getFillColor: [30, 30, 30, 255], 
+            getLineColor: [80, 80, 80, 200], 
+            lineWidthMinPixels: 1,
+            stroked: true,
+            filled: true
+        });
+
+        const mainColumnLayer = new deck.ColumnLayer({
+            id: 'column-layer',
+            data: data3d,
+            diskResolution: 4, 
+            radius: 6500, 
+            angle: 45, 
+            extruded: true,
+            wireframe: true, 
+            pickable: true,
+            elevationScale: conf.heightScale,
+            getPosition: d => d.position,
+            
+            getElevation: d => {
+                // REPRESENTATIVE NORMALIZED LOGIC:
+                let normalized = (d.value - minVal) / (maxVal - minVal || 1);
+                let height = normalized + 0.05; 
+
+                if (is3DGridSelector) {
+                    let inHoverRange = false;
+                    if (hoveredGrid3D) {
+                        const [hR, hC] = hoveredGrid3D;
+                        if (Math.abs(d.idx[0] - hR) <= 1 && Math.abs(d.idx[1] - hC) <= 1) inHoverRange = true;
+                    }
+                    let inLockRange = false;
+                    if (isGridLocked && lockedGridKey) {
+                        const [lR, lC] = lockedGridKey.split(',').map(Number);
+                        if (Math.abs(d.idx[0] - lR) <= 1 && Math.abs(d.idx[1] - lC) <= 1) inLockRange = true;
+                    }
+                    if (inHoverRange || inLockRange) return height;
+                    return 0; 
+                }
+                return height; 
+            },
+
+            getFillColor: d => {
+                const rgb = getComplexColor(d.value, minVal, maxVal, conf.cmap);
+                if (is3DGridSelector) {
+                    let inHoverRange = false;
+                    if (hoveredGrid3D) {
+                        const [hR, hC] = hoveredGrid3D;
+                        if (Math.abs(d.idx[0] - hR) <= 1 && Math.abs(d.idx[1] - hC) <= 1) inHoverRange = true;
+                    }
+                    let inLockRange = false;
+                    if (isGridLocked && lockedGridKey) {
+                        const [lR, lC] = lockedGridKey.split(',').map(Number);
+                        if (Math.abs(d.idx[0] - lR) <= 1 && Math.abs(d.idx[1] - lC) <= 1) inLockRange = true;
+                    }
+                    if (inHoverRange || inLockRange) return [...rgb, 200];
+                    else return [0,0,0,0];
+                }
+                return [...rgb, 200];
+            },
+            
+            getLineColor: d => {
+                 const rgb = getComplexColor(d.value, minVal, maxVal, conf.cmap);
+                 if (is3DGridSelector) {
+                    let inHoverRange = false;
+                    if (hoveredGrid3D) {
+                        const [hR, hC] = hoveredGrid3D;
+                        if (Math.abs(d.idx[0] - hR) <= 1 && Math.abs(d.idx[1] - hC) <= 1) inHoverRange = true;
+                    }
+                    let inLockRange = false;
+                    if (isGridLocked && lockedGridKey) {
+                        const [lR, lC] = lockedGridKey.split(',').map(Number);
+                        if (Math.abs(d.idx[0] - lR) <= 1 && Math.abs(d.idx[1] - lC) <= 1) inLockRange = true;
+                    }
+                    if (inHoverRange || inLockRange) return [rgb[0], rgb[1], rgb[2], 255];
+                    else return [0,0,0,0];
+                 }
+                 return [rgb[0], rgb[1], rgb[2], 255]; 
+            },
+            lineWidthMinPixels: 2, 
+            material: {
+                ambient: 1.0,    
+                diffuse: 0.0,    
+                shininess: 0,    
+                specularColor: [0, 0, 0] 
+            },
+            updateTriggers: {
+                getElevation: [is3DGridSelector, hoveredGrid3D, isGridLocked, lockedGridKey, minVal, maxVal],
+                getFillColor: [is3DGridSelector, hoveredGrid3D, isGridLocked, lockedGridKey, minVal, maxVal],
+                getLineColor: [is3DGridSelector, hoveredGrid3D, isGridLocked, lockedGridKey, minVal, maxVal]
+            },
+            transitions: {
+                getElevation: 150,
+                getFillColor: 150,
+                getLineColor: 150
+            }
+        });
+
+        deckgl.setProps({ layers: [gridFloorLayer, mainColumnLayer] });
+    }
+
+    // --- 3D MODE TOGGLES ---
+    mode3dGlobal.addEventListener('click', () => {
+        is3DGridSelector = false;
+        mode3dGlobal.classList.add('active');
+        mode3dGrid.classList.remove('active');
+        loadAreaAverageData(); 
+        update3DLayer(getCurrentTimeIndex());
+        mapTitle.textContent = "3D VISUALIZATION - GLOBAL VIEW";
+    });
+
+    mode3dGrid.addEventListener('click', () => {
+        is3DGridSelector = true;
+        mode3dGrid.classList.add('active');
+        mode3dGlobal.classList.remove('active');
+        mapTitle.textContent = "3D GRID SELECTOR - HOVER TO POP-UP (3x3)";
+        isGridLocked = false; lockedGridKey = null; hoveredGrid3D = null;
+        update3DLayer(getCurrentTimeIndex());
+    });
+
+    viewToggleBtn.addEventListener('click', () => {
+        if (is3DMode) toggle3DMode(false);
+
+        if (viewMode === 'grid') {
+            viewMode = 'spatial'; viewToggleBtn.textContent = "⚙️ GRID MODE"; viewToggleBtn.classList.add('spatial-active');
+            gridLayerGroup.clearLayers(); spatialOverlay.setOpacity(0.9); mapTitle.textContent = "SPATIAL PLOT + AREA AVERAGE (ALL DOMAIN)";
+            colorbarLegend.style.display = 'flex'; updateColorbarImage(); loadAreaAverageData();
+            let idx = (hoverIndex >= 0) ? hoverIndex : 0; updateSpatialFrame(idx);
+        } else {
+            viewMode = 'grid'; viewToggleBtn.textContent = "🗺️ SPATIAL VIEW"; viewToggleBtn.classList.remove('spatial-active');
+            spatialOverlay.setOpacity(0); setupGridSystem(gridJsonData); mapTitle.textContent = "SPATIAL FIELD (9-GRID SELECTOR)";
+            colorbarLegend.style.display = 'none'; if(currentGridRow !== -1) loadGridDataToChart(currentGridRow, currentGridCol);
+        }
+    });
+
+    threedToggleBtn.addEventListener('click', () => { toggle3DMode(!is3DMode); });
+
+    function toggle3DMode(active) {
+        is3DMode = active;
+        const map2dDiv = document.getElementById('map');
+        const map3dContainer = document.getElementById('map3d-container');
+        
+        if (is3DMode) {
+            threedToggleBtn.classList.add('active-3d'); threedToggleBtn.textContent = "❌ EXIT 3D";
+            viewToggleBtn.style.display = 'none'; btnMapToggle.style.display = 'none';
+            map2dDiv.style.display = 'none'; map3dContainer.style.display = 'block'; threedControls.style.display = 'flex';
+            
+            if(!deckgl) init3DMap();
+            
+            is3DGridSelector = false; 
+            mode3dGlobal.classList.add('active'); mode3dGrid.classList.remove('active');
+            mapTitle.textContent = "3D VISUALIZATION - GLOBAL VIEW";
+            loadAreaAverageData();
+            
+            setTimeout(() => { update3DLayer(getCurrentTimeIndex()); }, 100);
+        } else {
+            threedToggleBtn.classList.remove('active-3d'); threedToggleBtn.textContent = "🧊 3D VIEW";
+            viewToggleBtn.style.display = 'block'; btnMapToggle.style.display = 'block';
+            map2dDiv.style.display = 'block'; map3dContainer.style.display = 'none'; threedControls.style.display = 'none';
+            
+            if (viewMode === 'grid') { mapTitle.textContent = "SPATIAL FIELD (9-GRID SELECTOR)"; setupGridSystem(gridJsonData); } 
+            else { mapTitle.textContent = "SPATIAL PLOT + AREA AVERAGE"; }
+        }
+    }
+
+    function updateColorbarImage() {
+        if (!gridJsonData) return;
+        let path = "";
+        if (gridJsonData.metadata && gridJsonData.metadata.colorbar) { 
+            const cb = gridJsonData.metadata.colorbar; 
+            path = (typeof cb === 'object') ? cb[gridSubMode] : cb; 
+        } 
+        else if (gridJsonData.metadata.colorbar_paths) { 
+            path = gridJsonData.metadata.colorbar_paths[gridSubMode]; 
+        }
+
+        // Perbaikan: Tambahkan 'frames/' dan ganti ke .webp
+        if (path) {
+            let finalPath = 'frames/' + path.replace('.png', '.webp');
+            colorbarLegend.innerHTML = `<img src="${finalPath}" class="colorbar-img" alt="Legend">`;
+        } else {
+            colorbarLegend.innerHTML = "";
+        }
+    }
+
+    // MODIFIKASI: Penambahan pemuatan Area Average Boxplot
+    function loadAreaAverageData() {
+        if (!gridJsonData || !gridJsonData.area_average) return;
+        const aaData = gridJsonData.area_average;
+        let rawVals, rawLabels;
+        if (gridSubMode === 'ts') { rawVals = aaData.ts; rawLabels = gridJsonData.metadata.labels_ts; } 
+        else if (gridSubMode === 'clim') { rawVals = aaData.clim; rawLabels = gridJsonData.metadata.labels_clim; } 
+        else if (gridSubMode === 'seas') { rawVals = aaData.seas; rawLabels = gridJsonData.metadata.labels_seas; }
+        
+        // SUNTIKAN: Sinkronisasi Box Plot Area Average
+        if (chartMode === 'boxplot' && boxplotJsonData) {
+            const jsonKey = BOXPLOT_VAR_MAP[currentVar];
+            const bData = boxplotJsonData[jsonKey].area_average;
+            const rawBox = (gridSubMode === 'ts') ? bData.ts : (gridSubMode === 'clim' ? bData.clim : bData.seas);
+            // SUNTIKAN FIX: Filter boxplot berdasarkan null check data utama agar indeks sinkron
+            boxplotChartData = rawBox.filter((_, idx) => rawVals[idx] !== null);
+        }
+
+        fullChartData = rawLabels.map((lbl, idx) => ({ label: lbl, val: rawVals[idx], originalIdx: idx })).filter(d => d.val !== null);
+        resetZoom(); isChartLocked = false; lockedHoverIndex = -1; cvsCombined.classList.remove('chart-locked'); hoverIndex = -1;
+        drawAll(); computeAndRenderStats();
+        if (currentVar === 'wind') { roseLabel.textContent = "WIND ROSE (AREA AVERAGE - DYNAMIC)"; updateSpatialFrame(0); }
+        spatialTimeLabel.textContent = "Area Average Loaded";
+        if (compareVar !== 'none') syncSecondaryData(); 
+    }
+
+    smBtns.forEach(btn => {
+        if (btn.classList.contains('cmp-btn')) return;
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#subModeControls .sm-btn').forEach(b => b.classList.remove('active')); 
+            btn.classList.add('active'); 
+            gridSubMode = btn.dataset.mode;
+            
+            if(isChartLocked) { isChartLocked = false; lockedHoverIndex = -1; cvsCombined.classList.remove('chart-locked'); }
+            hoverIndex = -1; 
+            resetZoom(); 
+            
+            if (is3DMode) {
+                if(!is3DGridSelector) loadAreaAverageData(); 
+                else if (currentGridRow !== -1) loadGridDataToChart(currentGridRow, currentGridCol);
+                update3DLayer(0); 
+            } else if (viewMode === 'spatial') { 
+                updateColorbarImage(); loadAreaAverageData(); updateSpatialFrame(0); 
+            } else { 
+                if (currentGridRow !== -1) loadGridDataToChart(currentGridRow, currentGridCol); 
+            }
+        });
+    });
+
+    function resetZoom() {
+        zoomState = { yMin: null, yMax: null, yMinSec: null, yMaxSec: null, xStartIdx: 0, xEndIdx: fullChartData.length - 1, isYManual: false, isYManualSec: false, isXManual: false };
+        isZoomingY_Pri = false; isZoomingY_Sec = false; isZoomingX = false;
+    }
+
+    wrapper.addEventListener('dblclick', () => { if (fullChartData.length > 0) { resetZoom(); isChartLocked = false; lockedHoverIndex = -1; cvsCombined.classList.remove('chart-locked'); drawAll(); computeAndRenderStats(); } });
+
+    function updateInterfaceLabels() {
+        const conf = DATA_SOURCES[currentVar];
+        document.documentElement.style.setProperty('--neon-color', conf.color); document.documentElement.style.setProperty('--neon-glow', conf.fillTop);
+        document.getElementById('headerStatLabel').textContent = `${conf.short} (${conf.unit})`; document.getElementById('chartMainTitle').textContent = `${conf.label} (Click to Lock, Drag Axis to Zoom)`; document.getElementById('chartUnitLabel').textContent = conf.desc; document.getElementById('valMain').textContent = "--.--";
+        if(landLayer && !isSatellite) { landLayer.setStyle({ color: conf.color }); }
+        if (currentVar === 'wind') { roseWrapper.style.display = 'flex'; statsWrapper.style.gridColumn = 'auto'; } else { roseWrapper.style.display = 'none'; statsWrapper.style.gridColumn = 'span 2'; }
+        compareVar = 'none'; secondaryChartData = []; document.querySelectorAll('.cmp-btn').forEach(b => b.classList.remove('active')); document.querySelector('[data-cmp="none"]').classList.add('active');
+    }
+
+    // MODIFIKASI: Load Data paralel dengan boxplot
+    async function loadData() {
+        loadingOverlay.textContent = `Memuat Data ${DATA_SOURCES[currentVar].short}...`; loadingOverlay.style.display = 'flex';
+        updateInterfaceLabels();
+        try {
+            const res = await fetch(DATA_SOURCES[currentVar].url); if (!res.ok) throw new Error(); const json = await res.json(); gridJsonData = json;
+            
+            // SUNTIKAN: Load Boxplot data secara paralel jika belum ada
+            if (!boxplotJsonData) {
+                const bRes = await fetch('boxplot_data_meteo.json');
+                if (bRes.ok) boxplotJsonData = await bRes.json();
+            }
+
+            if (is3DMode) {
+                if(!is3DGridSelector) loadAreaAverageData(); 
+                update3DLayer(0);
+            } else if (viewMode === 'spatial') { 
+                updateColorbarImage(); loadAreaAverageData(); 
+            } else { 
+                setupGridSystem(json); 
+                if (currentGridRow === -1) { loadGridDataToChart(Math.floor(json.metadata.latitudes.length / 2), Math.floor(json.metadata.longitudes.length / 2)); } else { loadGridDataToChart(currentGridRow, currentGridCol); } 
+            }
+
+            if(json.metadata.bounds) { imageBounds = json.metadata.bounds; spatialOverlay.setBounds(imageBounds); }
+            if (!resizeObserver) initChartSystem(); else drawAll(); 
+        } catch (e) { console.error(e); alert(`Gagal memuat data ${currentVar}.`); } finally { loadingOverlay.style.display = 'none'; }
+    }
+
+    function setupGridSystem(data) {
+        if (viewMode === 'spatial' || is3DMode) return; 
+        
+        gridLayerGroup.clearLayers(); const lats = data.metadata.latitudes; const lons = data.metadata.longitudes; const halfRes = 0.0625;
+        gridRects = {}; activeHighlights = [];
+        lats.forEach((lat, i) => { lons.forEach((lon, j) => {
+                const rect = L.rectangle([[lat - halfRes, lon - halfRes], [lat + halfRes, lon + halfRes]], { color: '#444', weight: 1, fillColor: '#000', fillOpacity: 0.05, className: 'grid-cell-path' }).addTo(gridLayerGroup);
+                const key = `${i},${j}`; gridRects[key] = rect;
+                rect.on('mouseover', () => handleGridHover(i, j)); rect.on('click', () => handleGridClick(i, j));
+        });});
+        if (isGridLocked && lockedGridKey) { const [lr, lc] = lockedGridKey.split(',').map(Number); updateGridVisuals(lr, lc); }
+    }
+
+    function clearGridHighlights() { activeHighlights.forEach(key => { if (gridRects[key]) gridRects[key].setStyle({ color: '#444', weight: 1, fillColor: '#000', fillOpacity: 0.05, className: 'grid-cell-path' }); }); activeHighlights = []; }
+    
+    function handleGridHover(r, c) { 
+        if (viewMode === 'spatial' || isGridLocked || is3DMode) return; 
+        updateGridVisuals(r, c); 
+    }
+    
+    function handleGridClick(r, c) { 
+        if (is3DMode) {
+             const clickedKey = `${r},${c}`;
+             isGridLocked = true; lockedGridKey = clickedKey;
+             spatialTimeLabel.textContent = `Grid Selected: [${r}, ${c}] in 3D Mode`;
+             update3DLayer(getCurrentTimeIndex());
+             loadGridDataToChart(r, c);
+             return; 
+        }
+
+        if (viewMode === 'spatial') return; 
+        const clickedKey = `${r},${c}`; 
+        if (isGridLocked && lockedGridKey === clickedKey) { isGridLocked = false; lockedGridKey = null; } 
+        else { isGridLocked = true; lockedGridKey = clickedKey; updateGridVisuals(r, c); } 
+    }
+
+    function updateGridVisuals(r, c) {
+        if(is3DMode) return; 
+        clearGridHighlights(); const activeColor = DATA_SOURCES[currentVar].color;
+        for (let i = r - 1; i <= r + 1; i++) { for (let j = c - 1; j <= c + 1; j++) {
+                const key = `${i},${j}`; if (gridRects[key]) {
+                    const isCenter = (i === r && j === c); activeHighlights.push(key); 
+                    const layer = gridRects[key];
+                    if (isCenter) { layer.setStyle({ color: activeColor, weight: 2, fillColor: activeColor, fillOpacity: 0.5, className: 'neon-center-path' }); layer.bringToFront(); } 
+                    else { layer.setStyle({ color: '#888', weight: 1, fillColor: activeColor, fillOpacity: 0.2, className: 'neon-neighbor-path' }); }
+        }}} 
+        loadGridDataToChart(r, c); 
+    }
+
+    // MODIFIKASI: Load Grid Data dengan Boxplot
+    function loadGridDataToChart(r, c) {
+        if (!gridJsonData) return;
+        currentGridRow = r; currentGridCol = c; const key = `${r},${c}`; const cellData = gridJsonData.grid_data[key];
+        if (!cellData) { fullChartData = []; drawAll(); return; }
+        
+        let rawVals, rawLabels;
+        if (gridSubMode === 'ts') { rawVals = cellData.ts; rawLabels = gridJsonData.metadata.labels_ts; } 
+        else if (gridSubMode === 'clim') { rawVals = cellData.clim; rawLabels = gridJsonData.metadata.labels_clim; } 
+        else if (gridSubMode === 'seas') { rawVals = cellData.seas; rawLabels = gridJsonData.metadata.labels_seas; }
+
+        // SUNTIKAN: Sinkronisasi Box Plot Grid Data
+        if (chartMode === 'boxplot' && boxplotJsonData) {
+            const jsonKey = BOXPLOT_VAR_MAP[currentVar];
+            const bGrid = boxplotJsonData[jsonKey].grid_data[key];
+            const rawBox = (gridSubMode === 'ts') ? bGrid.ts : (gridSubMode === 'clim' ? bGrid.clim : bGrid.seas);
+            // SUNTIKAN FIX: Filter boxplot berdasarkan null check data utama
+            boxplotChartData = rawBox.filter((_, idx) => rawVals[idx] !== null);
+        }
+        
+        const newData = rawLabels.map((lbl, idx) => ({ label: lbl, val: rawVals[idx], originalIdx: idx })).filter(d => d.val !== null);
+        const isSameContext = (fullChartData.length > 0 && newData.length === fullChartData.length);
+        fullChartData = newData;
+
+        if (isSameContext) {
+            if (!zoomState.isYManual) { zoomState.yMin = null; zoomState.yMax = null; }
+            if (!zoomState.isYManualSec) { zoomState.yMinSec = null; zoomState.yMaxSec = null; }
+            if (isChartLocked && lockedHoverIndex >= fullChartData.length) {
+                isChartLocked = false; lockedHoverIndex = -1; cvsCombined.classList.remove('chart-locked');
+            }
+            hoverIndex = -1;
+        } else {
+            resetZoom(); isChartLocked = false; lockedHoverIndex = -1; cvsCombined.classList.remove('chart-locked'); hoverIndex = -1;
+        }
+
+        if (!is3DMode) {
+            spatialTimeLabel.textContent = `Grid Point: [${r}, ${c}]${isGridLocked ? " [LOCKED]" : ""}`;
+        }
+        
+        if (compareVar !== 'none') syncSecondaryData();
+        drawAll(); 
+        computeAndRenderStats();
+
+        if (isChartLocked && lockedHoverIndex !== -1 && fullChartData[lockedHoverIndex]) {
+            const d = fullChartData[lockedHoverIndex];
+            document.getElementById('valMain').textContent = d.val.toFixed(2);
+            const tooltip = document.getElementById('tooltip');
+            if (tooltip.style.display === 'block') {
+                const conf = DATA_SOURCES[currentVar];
+                let html = `<div style="color:#aaa; margin-bottom:6px; border-bottom:1px solid #333; padding-bottom:4px;"><span style="color:#fff; font-weight:600">${d.label}</span><span style="color:${conf.color}; float:right; font-size:9px">[LOCKED]</span></div>`;
+                html += `<div style="display:flex; justify-content:space-between; font-family:monospace; margin-bottom:4px;"><span style="color:${conf.color}">${conf.short}</span><span style="color:#fff">${d.val.toFixed(2)} ${conf.unit}</span></div>`;
+                if (compareVar !== 'none' && secondaryChartData[lockedHoverIndex]) {
+                    const cs = DATA_SOURCES[compareVar];
+                    html += `<div style="display:flex; justify-content:space-between; font-family:monospace"><span style="color:${cs.color}">${cs.short}</span><span style="color:#fff">${secondaryChartData[lockedHoverIndex].val.toFixed(2)} ${cs.unit}</span></div>`;
+                }
+                tooltip.innerHTML = html;
+            }
+        }
+    }
+
+    function updateSpatialFrame(dataIndex) {
+        if (!fullChartData[dataIndex]) return;
+        const fileIdx = fullChartData[dataIndex].originalIdx;
+        const label = fullChartData[dataIndex].label;
+
+        if (is3DMode) {
+            spatialTimeLabel.textContent = `3D Time: ${label}`;
+            if (raf3D_Lock) cancelAnimationFrame(raf3D_Lock);
+            raf3D_Lock = requestAnimationFrame(() => {
+                update3DLayer(fileIdx);
+                raf3D_Lock = null; 
+            });
+            return;
+        }
+
+        if (viewMode === 'spatial') {
+            let mapPrefix = "";
+            if(currentVar === 'wind') mapPrefix = gridJsonData.metadata.paths.map[gridSubMode];
+            else mapPrefix = gridJsonData.metadata.spatial_paths[gridSubMode];
+            
+            // Perbaikan: Tambahkan 'frames/' di depan path
+            spatialOverlay.setUrl(`frames/${mapPrefix}${fileIdx}.webp`); 
+            spatialTimeLabel.textContent = `Spatial Time: ${label}`;
+        }
+    }
+
+    function initChartSystem() {
+        if (!resizeObserver) { resizeObserver = new ResizeObserver(() => { fitCanvas(cvsCombined); map.invalidateSize(); }); resizeObserver.observe(wrapper); }
+        fitCanvas(cvsCombined); cvsCombined.addEventListener('mousedown', handleMouseDown); window.addEventListener('mousemove', handleMouseMove); window.addEventListener('mouseup', handleMouseUp);
+        requestAnimationFrame(renderLoop);
+    }
+
+    function fitCanvas(cvs) { const rect = cvs.parentElement.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1; cvs.width = rect.width * dpr; cvs.height = rect.height * dpr; const ctx = cvs.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
+    function renderLoop() { if (fullChartData.length > 0) drawAll(); requestAnimationFrame(renderLoop); }
+
+    function handleMouseDown(e) {
+        if (fullChartData.length === 0) return;
+        const rect = cvsCombined.getBoundingClientRect(); const x = e.clientX - rect.left; const y = e.clientY - rect.top; const w = rect.width; const h = rect.height; const pad = { t: 20, b: 25, l: 50, r: 50 };
+        if (x < pad.l && compareVar !== 'none') { isZoomingY_Sec = true; lastMouseY = e.clientY; zoomState.isYManualSec = true; document.body.classList.add('cursor-ns'); } 
+        else if (x > w - pad.r || (x < pad.l && compareVar === 'none')) { isZoomingY_Pri = true; lastMouseY = e.clientY; zoomState.isYManual = true; document.body.classList.add('cursor-ns'); } 
+        else if (y > h - pad.b) { isZoomingX = true; lastMouseX = e.clientX; zoomState.isXManual = true; document.body.classList.add('cursor-ew'); } 
+        else { handleChartClick(e); }
+    }
+
+    function handleChartClick(e) {
+        isChartLocked = !isChartLocked;
+        if (isChartLocked) { lockedHoverIndex = hoverIndex; cvsCombined.classList.add('chart-locked'); } else { lockedHoverIndex = -1; cvsCombined.classList.remove('chart-locked'); }
+        drawAll(); 
+    }
+
+    function handleMouseMove(e) {
+        const rect = cvsCombined.getBoundingClientRect(); const x = e.clientX - rect.left; const y = e.clientY - rect.top; const w = rect.width; const h = rect.height; const pad = { t: 20, b: 25, l: 50, r: 50 };
+        if (isZoomingY_Pri) {
+            const dy = e.clientY - lastMouseY; lastMouseY = e.clientY; let range = zoomState.yMax - zoomState.yMin;
+            let pivotY = (isChartLocked && lockedHoverIndex !== -1 && fullChartData[lockedHoverIndex]) ? fullChartData[lockedHoverIndex].val : (zoomState.yMin + zoomState.yMax) / 2;
+            let newRange = range * (1 + (dy * 0.01)); if (newRange < 0.1) newRange = 0.1;
+            zoomState.yMin = pivotY - newRange / 2; zoomState.yMax = pivotY + newRange / 2; drawAll(); return; 
+        }
+        if (isZoomingY_Sec) {
+            const dy = e.clientY - lastMouseY; lastMouseY = e.clientY; let range = zoomState.yMaxSec - zoomState.yMinSec;
+            let pivotY = (zoomState.yMinSec + zoomState.yMaxSec) / 2; let newRange = range * (1 + (dy * 0.01)); if (newRange < 0.1) newRange = 0.1;
+            zoomState.yMinSec = pivotY - newRange / 2; zoomState.yMaxSec = pivotY + newRange / 2; drawAll(); return;
+        }
+        if (isZoomingX) {
+            const dx = e.clientX - lastMouseX; lastMouseX = e.clientX;
+            let currentWindow = zoomState.xEndIdx - zoomState.xStartIdx;
+            let pivotIdx = (isChartLocked && lockedHoverIndex !== -1) ? lockedHoverIndex : (zoomState.xStartIdx + zoomState.xEndIdx) / 2;
+            let newWindow = currentWindow * (1 + (dx * 0.005)); if (newWindow < 12) newWindow = 12; if (newWindow > fullChartData.length) newWindow = fullChartData.length;
+            let halfWindow = newWindow / 2; let newStart = pivotIdx - halfWindow; let newEnd = pivotIdx + halfWindow;
+            if (newStart < 0) { newStart = 0; newEnd = Math.min(fullChartData.length - 1, newStart + newWindow); }
+            if (newEnd >= fullChartData.length) { newEnd = fullChartData.length - 1; newStart = Math.max(0, newEnd - newWindow); }
+            zoomState.xStartIdx = Math.round(newStart); zoomState.xEndIdx = Math.round(newEnd); drawAll(); computeAndRenderStats(); return;
+        }
+        if (x > w - pad.r) { cvsCombined.classList.add('cursor-ns'); cvsCombined.classList.remove('cursor-ew'); }
+        else if (x < pad.l && compareVar !== 'none') { cvsCombined.classList.add('cursor-ns'); cvsCombined.classList.remove('cursor-ew'); }
+        else if (y > h - pad.b) { cvsCombined.classList.add('cursor-ew'); cvsCombined.classList.remove('cursor-ns'); }
+        else { cvsCombined.classList.remove('cursor-ns', 'cursor-ew'); if (!isChartLocked) processTooltipHover(e, rect, pad); }
+    }
+
+    function processTooltipHover(e, rect, pad) {
+        if (e.clientX - rect.left < pad.l || e.clientY - rect.top > rect.height - pad.b) { tooltip.style.display = 'none'; return; }
+        let visibleLen = zoomState.xEndIdx - zoomState.xStartIdx + 1;
+        let chartWidth = rect.width - pad.l - pad.r;
+        let ratio = Math.max(0, Math.min(1, (e.clientX - rect.left - pad.l) / chartWidth));
+        
+        hoverIndex = zoomState.xStartIdx + Math.round(ratio * (visibleLen - 1));
+        
+        if (fullChartData[hoverIndex]) {
+             document.getElementById('valMain').textContent = fullChartData[hoverIndex].val.toFixed(2);
+             updateTooltip(e.clientX, e.clientY, hoverIndex, fullChartData);
+             updateSpatialFrame(hoverIndex); 
+        }
+    }
+
+    function handleMouseUp() { if(isZoomingY_Pri || isZoomingY_Sec || isZoomingX) { isZoomingY_Pri = false; isZoomingY_Sec = false; isZoomingX = false; document.body.classList.remove('cursor-ns', 'cursor-ew'); } }
+
+    function drawAll() {
+        const dpr = window.devicePixelRatio || 1; const cvs = cvsCombined; const ctx = ctxCombined;
+        const w = cvs.width / dpr; const h = cvs.height / dpr; const pad = { t: 20, b: 25, l: 50, r: 50 }; 
+        ctx.clearRect(0, 0, w, h); if (fullChartData.length === 0) { ctx.fillStyle = "#555"; ctx.textAlign = "center"; ctx.fillText("DATA TIDAK TERSEDIA", w/2, h/2); return; }
+        
+        let visibleData = fullChartData.slice(zoomState.xStartIdx, zoomState.xEndIdx + 1);
+        let visibleBoxData = [];
+        if (chartMode === 'boxplot' && boxplotChartData.length > 0) {
+            visibleBoxData = boxplotChartData.slice(zoomState.xStartIdx, zoomState.xEndIdx + 1);
+        }
+
+        if (visibleData.length === 0) return;
+        
+        // Penetapan Skala Y
+        if (!zoomState.isYManual) {
+            let min, max;
+            if (chartMode === 'boxplot' && visibleBoxData.length > 0) {
+                min = Math.min(...visibleBoxData.map(d => d[0]));
+                max = Math.max(...visibleBoxData.map(d => d[4]));
+            } else {
+                const vals = visibleData.map(d => d.val);
+                min = Math.min(...vals); max = Math.max(...vals);
+            }
+            let p = (max - min) * 0.1 || 0.5; zoomState.yMin = min - p; zoomState.yMax = max + p;
+        }
+        const rMin = zoomState.yMin, rMax = zoomState.yMax;
+        
+        let hasOverlay = (chartMode === 'line' && compareVar !== 'none' && secondaryChartData.length > 0);
+        let visibleSecData = [];
+        if (hasOverlay) {
+            visibleSecData = secondaryChartData.slice(zoomState.xStartIdx, zoomState.xEndIdx + 1);
+            const sVals = visibleSecData.map(d => d.val);
+            if (sVals.length > 0 && !zoomState.isYManualSec) { let min = Math.min(...sVals), max = Math.max(...sVals), p = (max-min)*0.1 || 0.5; zoomState.yMinSec = min-p; zoomState.yMaxSec = max+p; }
+        }
+        const lMin = zoomState.yMinSec, lMax = zoomState.yMaxSec;
+
+        const getX = i => pad.l + (i / (visibleData.length - 1)) * (w - pad.l - pad.r);
+        const getY_Pri = v => pad.t + (1 - (v - rMin) / (rMax - rMin)) * (h - pad.t - pad.b);
+        const getY_Sec = v => pad.t + (1 - (v - lMin) / (lMax - lMin)) * (h - pad.t - pad.b);
+
+        // Draw Grids
+        ctx.lineWidth = 1; ctx.font = '10px monospace';
+        for (let i = 0; i <= 5; i++) {
+            const ratio = i / 5; const y = pad.t + (1 - ratio) * (h - pad.t - pad.b);
+            ctx.beginPath(); ctx.strokeStyle = THEME.grid; ctx.setLineDash([4, 4]); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
+            ctx.fillStyle = DATA_SOURCES[currentVar].color; ctx.textAlign = 'left'; ctx.setLineDash([]); ctx.fillText((rMin + (rMax - rMin) * ratio).toFixed(1), w - pad.r + 5, y + 3);
+            if (hasOverlay) { ctx.fillStyle = DATA_SOURCES[compareVar].color; ctx.textAlign = 'right'; ctx.fillText((lMin + (lMax - lMin) * ratio).toFixed(1), pad.l - 8, y + 3); }
+        }
+
+        // Labels
+        const pxPerLabel = 60, stepLabel = Math.max(1, Math.ceil(visibleData.length / Math.floor((w - pad.l - pad.r) / pxPerLabel)));
+        visibleData.forEach((d, i) => {
+            const x = getX(i);
+            if (i === 0 || i === visibleData.length - 1 || i % stepLabel === 0) {
+                ctx.textAlign = (i === 0) ? 'left' : (i === visibleData.length - 1) ? 'right' : 'center';
+                ctx.fillStyle = THEME.text; ctx.setLineDash([]); ctx.fillText((visibleData.length > 24 && d.label.length > 4) ? d.label.split('-')[0] : d.label, (i === 0) ? x + 2 : (i === visibleData.length - 1) ? x - 2 : x, h - 8);
+            }
+        });
+
+        const cp = DATA_SOURCES[currentVar];
+        let displayIndex = isChartLocked ? lockedHoverIndex : hoverIndex;
+        let relativeIndex = (displayIndex >= zoomState.xStartIdx && displayIndex <= zoomState.xEndIdx) ? displayIndex - zoomState.xStartIdx : -1;
+
+        // --- SUNTIKAN: RENDERING LOGIC ---
+        if (chartMode === 'boxplot' && visibleBoxData.length > 0) {
+            // Draw Boxplots
+            const boxWidth = Math.max(2, (w - pad.l - pad.r) / visibleBoxData.length * 0.7);
+            visibleBoxData.forEach((b, i) => {
+                const x = getX(i);
+                const yMin = getY_Pri(b[0]), yQ1 = getY_Pri(b[1]), yMed = getY_Pri(b[2]), yQ3 = getY_Pri(b[3]), yMax = getY_Pri(b[4]);
+                
+                // Whiskers
+                ctx.beginPath(); ctx.strokeStyle = cp.color; ctx.lineWidth = 1; ctx.setLineDash([]);
+                ctx.moveTo(x, yMin); ctx.lineTo(x, yMax); ctx.stroke();
+                ctx.moveTo(x - boxWidth/4, yMin); ctx.lineTo(x + boxWidth/4, yMin); ctx.stroke();
+                ctx.moveTo(x - boxWidth/4, yMax); ctx.lineTo(x + boxWidth/4, yMax); ctx.stroke();
+
+                // Box
+                ctx.fillStyle = cp.fillTop; ctx.fillRect(x - boxWidth/2, yQ3, boxWidth, yQ1 - yQ3);
+                ctx.strokeStyle = cp.color; ctx.lineWidth = 1.5; ctx.strokeRect(x - boxWidth/2, yQ3, boxWidth, yQ1 - yQ3);
+
+                // Median
+                ctx.beginPath(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
+                ctx.moveTo(x - boxWidth/2, yMed); ctx.lineTo(x + boxWidth/2, yMed); ctx.stroke();
+            });
+        } else {
+            // Original Line Logic
+            let limitIndex = (relativeIndex !== -1) ? relativeIndex : (isChartLocked ? -1 : visibleData.length - 1);
+            ctx.beginPath(); ctx.strokeStyle = '#333'; ctx.lineWidth = 1; ctx.setLineDash([]);
+            ctx.moveTo(getX(0), getY_Pri(visibleData[0].val)); for (let i = 1; i < visibleData.length; i++) ctx.lineTo(getX(i), getY_Pri(visibleData[i].val)); ctx.stroke();
+            
+            if (hasOverlay) { 
+                ctx.save(); ctx.beginPath(); ctx.lineWidth = 2; ctx.strokeStyle = DATA_SOURCES[compareVar].color; ctx.setLineDash([3, 3]); 
+                ctx.moveTo(getX(0), getY_Sec(visibleSecData[0].val)); 
+                for (let i = 1; i <= limitIndex; i++) if (visibleSecData[i]) ctx.lineTo(getX(i), getY_Sec(visibleSecData[i].val)); 
+                ctx.stroke(); ctx.restore();
+            }
+
+            ctx.save(); ctx.beginPath(); ctx.rect(pad.l, pad.t, getX(limitIndex) - pad.l, h - pad.t - pad.b); ctx.clip(); 
+            const grad = ctx.createLinearGradient(0, pad.t, 0, h - pad.b); grad.addColorStop(0, cp.fillTop); grad.addColorStop(1, cp.fillBottom);
+            ctx.beginPath(); ctx.moveTo(getX(0), h - pad.b); ctx.lineTo(getX(0), getY_Pri(visibleData[0].val)); 
+            for (let i = 1; i <= limitIndex; i++) ctx.lineTo(getX(i), getY_Pri(visibleData[i].val)); 
+            ctx.lineTo(getX(limitIndex), h - pad.b); ctx.closePath(); ctx.fillStyle = grad; ctx.fill();
+            ctx.beginPath(); ctx.lineWidth = 2; ctx.strokeStyle = cp.color; ctx.setLineDash([]);
+            ctx.moveTo(getX(0), getY_Pri(visibleData[0].val)); for (let i = 1; i <= limitIndex; i++) ctx.lineTo(getX(i), getY_Pri(visibleData[i].val)); ctx.stroke();
+            ctx.restore();
+        }
+
+        // Radar point / Hover line
+        if (relativeIndex !== -1) {
+            const cx = getX(relativeIndex);
+            ctx.beginPath(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); 
+            ctx.moveTo(cx, pad.t); ctx.lineTo(cx, h - pad.b); ctx.stroke(); ctx.setLineDash([]);
+            if (chartMode === 'line') {
+                drawRadarPoint(ctx, cx, getY_Pri(visibleData[relativeIndex].val), cp.color, isChartLocked, {w:w, pad:pad});
+                if (hasOverlay && visibleSecData[relativeIndex]) drawRadarPoint(ctx, cx, getY_Sec(visibleSecData[relativeIndex].val), DATA_SOURCES[compareVar].color, isChartLocked, {w:w, pad:pad});
+            }
+        }
+    }
+
+    function drawRadarPoint(ctx, x, y, color, isLocked, dim) {
+        ctx.beginPath(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); 
+        ctx.moveTo(dim.pad.l, y); ctx.lineTo(dim.w - dim.pad.r, y); ctx.stroke(); ctx.setLineDash([]);
+
+        if (isLocked) {
+            ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+        } else {
+            const time = Date.now(); const duration = 2000; 
+            for (let i = 0; i < 2; i++) { 
+                const progress = ((time + i * 800) % duration) / duration; 
+                ctx.beginPath(); ctx.arc(x, y, progress * 20 + 4, 0, Math.PI * 2); 
+                ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.globalAlpha = Math.max(0, 0.6 - progress); ctx.stroke(); ctx.globalAlpha = 1;
+            }
+        }
+        ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill();
+        ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+    }
+
+    function updateTooltip(mx, my, idx, dataArr) {
+        if (!dataArr[idx]) return; const d = dataArr[idx]; const conf = DATA_SOURCES[currentVar];
+        tooltip.style.display = 'block'; let left = mx + 20; if (left + 160 > window.innerWidth) left = mx - 180;
+        tooltip.style.left = left + 'px'; tooltip.style.top = Math.min(my, window.innerHeight - 80) + 'px';
+        
+        let html = `<div style="color:#aaa; margin-bottom:6px; border-bottom:1px solid #333; padding-bottom:4px;"><span style="color:#fff; font-weight:600">${d.label}</span>${isChartLocked ? `<span style="color:${conf.color}; float:right; font-size:9px">[LOCKED]</span>` : ''}</div>`;
+        
+        // MODIFIKASI: Tooltip khusus Box Plot
+        if (chartMode === 'boxplot' && boxplotChartData[idx]) {
+            const b = boxplotChartData[idx];
+            html += `<div style="font-family:monospace; font-size:10px;">`;
+            html += `<div style="display:flex; justify-content:space-between;"><span style="color:#888">MAX:</span><span style="color:#fff">${b[4].toFixed(2)}</span></div>`;
+            html += `<div style="display:flex; justify-content:space-between;"><span style="color:#888">Q3:</span><span style="color:#fff">${b[3].toFixed(2)}</span></div>`;
+            html += `<div style="display:flex; justify-content:space-between;"><span style="color:${conf.color}">MEDIAN:</span><span style="color:${conf.color}; font-weight:bold;">${b[2].toFixed(2)}</span></div>`;
+            html += `<div style="display:flex; justify-content:space-between;"><span style="color:#888">Q1:</span><span style="color:#fff">${b[1].toFixed(2)}</span></div>`;
+            html += `<div style="display:flex; justify-content:space-between;"><span style="color:#888">MIN:</span><span style="color:#fff">${b[0].toFixed(2)}</span></div>`;
+            html += `</div>`;
+        } else {
+            html += `<div style="display:flex; justify-content:space-between; font-family:monospace; margin-bottom:4px;"><span style="color:${conf.color}">${conf.short}</span><span style="color:#fff">${d.val.toFixed(2)} ${conf.unit}</span></div>`;
+            if (compareVar !== 'none' && secondaryChartData[idx]) { const cs = DATA_SOURCES[compareVar]; html += `<div style="display:flex; justify-content:space-between; font-family:monospace"><span style="color:${cs.color}">${cs.short}</span><span style="color:#fff">${secondaryChartData[idx].val.toFixed(2)} ${cs.unit}</span></div>`; }
+        }
+        tooltip.innerHTML = html;
+    }
+
+    function computeAndRenderStats() {
+        let visibleData = fullChartData.slice(zoomState.xStartIdx, zoomState.xEndIdx + 1); if (visibleData.length === 0) return;
+        
+        const conf = DATA_SOURCES[currentVar];
+        const vals = visibleData.map(d => d.val); 
+        const mean = vals.reduce((a,b) => a+b, 0) / vals.length;
+        
+        let minVal = Math.min(...vals);
+        let maxVal = Math.max(...vals);
+
+        // MODIFIKASI: Jika boxplot aktif, statistik min-max mengikuti rentang whiskers
+        if (chartMode === 'boxplot' && boxplotChartData.length > 0) {
+            const visibleBox = boxplotChartData.slice(zoomState.xStartIdx, zoomState.xEndIdx + 1);
+            minVal = Math.min(...visibleBox.map(b => b[0]));
+            maxVal = Math.max(...visibleBox.map(b => b[4]));
+        }
+
+        document.getElementById('newStatsBox').innerHTML = `
+            <div class="stat-group">
+                <span class="sg-title">${conf.label}</span>
+                <div class="sg-row"><span class="sg-label">Mean</span> <span class="sg-val">${mean.toFixed(2)}</span></div>
+                <div class="sg-row"><span class="sg-label">Min</span> <span class="sg-val">${minVal.toFixed(2)}</span></div>
+                <div class="sg-row"><span class="sg-label">Max</span> <span class="sg-val">${maxVal.toFixed(2)}</span></div>
+            </div>`;
+    }
+
+    if (typeof d3 === 'undefined') { window.d3 = { easeCubicOut: function(t) { return --t * t * t + 1; } }; }
+
+    loadData();
+</script>
+</body>
+</html>
